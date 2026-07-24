@@ -11,18 +11,28 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import java.io.File
+import java.util.concurrent.Executors
 
 
 class KeySnifferService : AccessibilityService() {
 
     private var recorder: MediaRecorder? = null
-    private var currentFile : File? = null
+    private var currentFile: File? = null
+    private lateinit var bridgeClient: BridgeClient
+    private val uploadExecutor = Executors.newSingleThreadExecutor()
 
-
-
+    override fun onCreate() {
+        super.onCreate()
+        bridgeClient = BridgeClient(SecureConfig(this))
+    }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
     override fun onInterrupt() {}
+
+    override fun onDestroy() {
+        super.onDestroy()
+        uploadExecutor.shutdown()
+    }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
         if (event.scanCode != ESSENTIAL_SCAN_CODE) return false
@@ -74,10 +84,15 @@ class KeySnifferService : AccessibilityService() {
             return
         }
 
-        vibrate()
+        val fileToUpload = currentFile
         cleanup()
-        Log.d(TAG, "recording saved: ${currentFile?.absolutePath}")
         broadcast("UP")
+
+        if (fileToUpload != null) {
+            uploadExecutor.execute { bridgeClient.uploadAudio(fileToUpload) }
+        }
+        vibrate()
+        Log.d(TAG, "recording saved: ${fileToUpload?.absolutePath}")
     }
 
     private fun vibrate() {
