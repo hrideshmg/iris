@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -20,15 +21,20 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import android.provider.Settings
 import android.text.TextUtils
 import com.example.iris.ui.theme.IrisTheme
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+    private val requestNotifPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
     private fun checkAndRequestAudioPermission() {
         val permission = Manifest.permission.RECORD_AUDIO
         if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
@@ -37,6 +43,15 @@ class MainActivity : ComponentActivity() {
                     Toast.makeText(this, "Microphone permission is required, please enable in settings", Toast.LENGTH_SHORT).show()
                 }
             }.launch(permission)
+        }
+    }
+
+    private fun checkAndRequestNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val permission = Manifest.permission.POST_NOTIFICATIONS
+            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+                requestNotifPermission.launch(permission)
+            }
         }
     }
 
@@ -71,38 +86,45 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Check audio runtime permission on launch
         checkAndRequestAudioPermission()
+        checkAndRequestNotificationPermission()
 
         val config = SecureConfig(this)
 
         setContent {
             IrisTheme {
-                var keyState by remember { mutableStateOf("waiting…") }
                 var isAccessibilityEnabled by remember { mutableStateOf(false) }
                 var showSettings by remember { mutableStateOf(false) }
+                var latest by remember { mutableStateOf<PttMessage?>(null) }
 
-                // Check service status when returning to the app
+                LaunchedEffect(Unit) {
+                    latest = MessageStore.load(this@MainActivity)
+                }
+
                 DisposableEffect(Unit) {
                     val receiver = object : BroadcastReceiver() {
                         override fun onReceive(context: Context, intent: Intent) {
-                            val action = intent.getStringExtra(KeySnifferService.EXTRA_ACTION) ?: "?"
-                            keyState = action
+                            when (intent.action) {
+                                KeySnifferService.ACTION_RESPONSE -> {
+                                    latest = PttMessage(
+                                        transcript = intent.getStringExtra(KeySnifferService.EXTRA_TRANSCRIPT) ?: "",
+                                        response = intent.getStringExtra(KeySnifferService.EXTRA_RESPONSE) ?: "",
+                                        timestamp = intent.getLongExtra(KeySnifferService.EXTRA_TIMESTAMP, System.currentTimeMillis())
+                                    )
+                                }
+                            }
                         }
                     }
-
-                    // helper function for backwards-compatible API requirements introduced in Android 14
+                    val filter = IntentFilter(KeySnifferService.ACTION_RESPONSE)
                     ContextCompat.registerReceiver(
                         this@MainActivity,
                         receiver,
-                        IntentFilter(KeySnifferService.ACTION_KEY_EVENT),
+                        filter,
                         ContextCompat.RECEIVER_NOT_EXPORTED,
                     )
-
                     onDispose { unregisterReceiver(receiver) }
                 }
 
-                // Update accessibility status whenever activity resumes
                 LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
                     isAccessibilityEnabled = isAccessibilityServiceEnabled(
                         this@MainActivity,
@@ -127,16 +149,20 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 ) { padding ->
-                    Box(
-                        modifier = Modifier.fillMaxSize().padding(padding),
-                        contentAlignment = Alignment.Center,
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding)
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-
-                            // Prominent banner/button if Accessibility is disabled
-                            if (!isAccessibilityEnabled) {
+                        if (!isAccessibilityEnabled) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
                                 Card(
-                                    modifier = Modifier.padding(16.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
                                     colors = CardDefaults.cardColors(
                                         containerColor = MaterialTheme.colorScheme.errorContainer
                                     )
@@ -160,12 +186,27 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 }
-                                Spacer(Modifier.height(24.dp))
                             }
-                            else {
-                                Text("Essential Key", style = MaterialTheme.typography.titleMedium)
-                                Spacer(Modifier.height(16.dp))
-                                Text(keyState, fontSize = 48.sp)
+                        }
+
+                        else {
+                            val msg = latest
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .weight(1f)
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (msg == null) {
+                                    Text(
+                                        "Hold the Essential Key to talk",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                } else {
+                                    MessageItem(msg)
+                                }
                             }
                         }
                     }
@@ -173,5 +214,59 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
 
+@Composable
+private fun MessageItem(msg: PttMessage) {
+    val fmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    val time = fmt.format(Date(msg.timestamp))
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // User transcript bubble (right-aligned)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            Surface(
+                shape = RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.widthIn(max = 280.dp)
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Text(
+                        msg.transcript,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        time,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f),
+                        modifier = Modifier.align(Alignment.End)
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+
+        // Assistant response bubble (left-aligned)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Start
+        ) {
+            Surface(
+                shape = RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.widthIn(max = 280.dp)
+            ) {
+                Text(
+                    msg.response,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                )
+            }
+        }
+    }
 }

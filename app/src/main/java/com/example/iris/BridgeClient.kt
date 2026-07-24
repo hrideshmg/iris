@@ -6,6 +6,7 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
+import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -17,7 +18,7 @@ class BridgeClient(private val config: SecureConfig) {
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
 
-    fun uploadAudio(file: File) {
+    fun uploadAudio(file: File, onResult: (PttMessage) -> Unit) {
         if (!config.isConfigured) {
             Log.w(TAG, "Bridge not configured, skipping upload")
             return
@@ -37,10 +38,22 @@ class BridgeClient(private val config: SecureConfig) {
 
         try {
             http.newCall(request).execute().use { response ->
+                val bodyStr = response.body?.string() ?: ""
                 if (response.isSuccessful) {
-                    Log.d(TAG, "Upload succeeded: ${response.code} ${response.body?.string()}")
+                    Log.d(TAG, "Upload succeeded: ${response.code} $bodyStr")
+                    try {
+                        val json = JSONObject(bodyStr)
+                        val msg = PttMessage(
+                            transcript = json.optString("transcript"),
+                            response = json.optString("response"),
+                            timestamp = System.currentTimeMillis()
+                        )
+                        onResult(msg)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to parse response", e)
+                    }
                 } else {
-                    Log.e(TAG, "Upload failed: ${response.code} ${response.body?.string()}")
+                    Log.e(TAG, "Upload failed: ${response.code} $bodyStr")
                 }
             }
         } catch (e: IOException) {

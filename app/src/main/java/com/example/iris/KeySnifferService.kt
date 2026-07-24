@@ -1,17 +1,22 @@
 package com.example.iris
 
 import android.accessibilityservice.AccessibilityService
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.Vibrator
 import android.os.VibrationEffect
+import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import android.util.Log
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 
 class KeySnifferService : AccessibilityService() {
@@ -24,6 +29,7 @@ class KeySnifferService : AccessibilityService() {
     override fun onCreate() {
         super.onCreate()
         bridgeClient = BridgeClient(SecureConfig(this))
+        createNotificationChannel()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
@@ -89,7 +95,13 @@ class KeySnifferService : AccessibilityService() {
         broadcast("UP")
 
         if (fileToUpload != null) {
-            uploadExecutor.execute { bridgeClient.uploadAudio(fileToUpload) }
+            uploadExecutor.execute {
+                bridgeClient.uploadAudio(fileToUpload) { msg ->
+                    MessageStore.save(this, msg)
+                    broadcastResponse(msg)
+                    postNotification(msg)
+                }
+            }
         }
         vibrate()
         Log.d(TAG, "recording saved: ${fileToUpload?.absolutePath}")
@@ -115,10 +127,56 @@ class KeySnifferService : AccessibilityService() {
         )
     }
 
+    private fun broadcastResponse(msg: PttMessage) {
+        sendBroadcast(
+            Intent(ACTION_RESPONSE)
+                .setPackage(packageName)
+                .putExtra(EXTRA_TRANSCRIPT, msg.transcript)
+                .putExtra(EXTRA_RESPONSE, msg.response)
+                .putExtra(EXTRA_TIMESTAMP, msg.timestamp)
+        )
+    }
+
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            NOTIF_CHANNEL_ID,
+            "Iris Responses",
+            NotificationManager.IMPORTANCE_DEFAULT
+        )
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(channel)
+    }
+
+    private fun postNotification(msg: PttMessage) {
+        val openIntent = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notif = NotificationCompat.Builder(this, NOTIF_CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("Reply from Hermes.")
+            .setContentText(msg.response.take(120))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(msg.response))
+            .setContentIntent(openIntent)
+            .setAutoCancel(true)
+            .build()
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.notify(notifId.getAndIncrement(), notif)
+    }
+
     companion object {
         const val ESSENTIAL_SCAN_CODE = 250
         const val ACTION_KEY_EVENT = "com.example.iris.ESSENTIAL_KEY"
+        const val ACTION_RESPONSE = "com.example.iris.RESPONSE"
         const val EXTRA_ACTION = "action"
+        const val EXTRA_TRANSCRIPT = "transcript"
+        const val EXTRA_RESPONSE = "response"
+        const val EXTRA_TIMESTAMP = "timestamp"
+        private const val NOTIF_CHANNEL_ID = "iris_responses"
         private const val TAG = "KeySnifferService"
+        private val notifId = AtomicInteger(1000)
     }
 }
