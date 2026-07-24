@@ -97,6 +97,8 @@ Type=simple
 WorkingDirectory=$IRIS_HOME/bridge
 Environment=HERMES_HOME=$HERMES_HOME
 Environment=PYTHONPATH=$HERMES_SRC
+# Required: the bridge imports Hermes STT directly, so it needs Hermes' provider keys.
+EnvironmentFile=$HERMES_HOME/.env
 EnvironmentFile=$IRIS_HOME/bridge/.env
 ExecStart=$HERMES_VENV/bin/uvicorn main:app --host 127.0.0.1 --port 8807
 Restart=on-failure
