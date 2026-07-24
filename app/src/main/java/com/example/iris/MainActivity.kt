@@ -29,7 +29,8 @@ class MainActivity : ComponentActivity() {
                 DisposableEffect(Unit) {
                     val receiver = object : BroadcastReceiver() {
                         override fun onReceive(context: Context, intent: Intent) {
-                            keyState = intent.getStringExtra("action") ?: "?"
+                            val action = intent.getStringExtra(KeySnifferService.EXTRA_ACTION) ?: "?"
+                            keyState = action
                         }
                     }
 
