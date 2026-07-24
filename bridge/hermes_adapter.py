@@ -1,4 +1,3 @@
-"""Thin adapter over Hermes: transcription (direct import) + agent turn (CLI)."""
 import subprocess
 import sys
 from pathlib import Path
@@ -30,7 +29,25 @@ def transcribe(file_path: Path) -> str:
     return text
 
 
+def _ensure_ptt_session() -> None:
+    """Create the dedicated session record before asking Hermes to resume it."""
+    _ensure_hermes_importable()
+    try:
+        from hermes_state import SessionDB  # type: ignore
+
+        db = SessionDB()
+        if not db.get_session(_PTT_SESSION_ID):
+            db.create_session(
+                _PTT_SESSION_ID,
+                source="iris-bridge",
+                cwd=str(settings.hermes_home),
+            )
+    except Exception as e:
+        raise RuntimeError(f"cannot initialize PTT session: {e}") from e
+
+
 def run_agent_turn(transcript: str) -> tuple[str, str]:
+    _ensure_ptt_session()
     cmd = [
         settings.hermes_cli, "chat",
         "-Q",

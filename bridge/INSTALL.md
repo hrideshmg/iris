@@ -1,5 +1,24 @@
 # Iris Bridge — Install Guide
 
+
+## 0. Prerequisites
+
+- A working Hermes installation with a source tree containing `tools/transcription_tools.py`.
+- `systemd --user` available (`systemctl --user is-active default.target`).
+The commands below use `$HOME/iris`, `$HOME/.hermes`, and the common source-install venv at `$HOME/.hermes/hermes-agent/venv`. Discover and verify the paths first instead of assuming an older `$HOME/.hermes/venv` layout.
+
+```bash
+export IRIS_HOME="$HOME/iris"
+export HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+export HERMES_SRC="$HERMES_HOME/hermes-agent"
+export HERMES_VENV="$HERMES_SRC/venv"
+export HERMES_CLI="$HERMES_VENV/bin/hermes"
+
+[ -f "$HERMES_SRC/tools/transcription_tools.py" ]
+[ -x "$HERMES_VENV/bin/python" ]
+[ -x "$HERMES_CLI" ]
+"$HERMES_CLI" --version
+
 ## 1. Clone the repo
 
 ```bash
@@ -7,7 +26,7 @@ cd /home/user
 git clone <repo-url> iris
 ```
 
-## 2. Verify config.py paths
+## 2. Verify config.py and create .env
 
 Open `bridge/config.py` and confirm these match your environment:
 
@@ -27,10 +46,15 @@ ls /home/user/.hermes/hermes-agent/tools/transcription_tools.py
 ```
 
 Create `bridge/.env` with your actual paths — this is required:
-```ini
-IRIS_HERMES_HOME=/home/actualuser/.hermes
-IRIS_HERMES_SRC=/home/actualuser/.hermes/hermes-agent
-IRIS_HERMES_CLI=/home/actualuser/.hermes/venv/bin/hermes
+```bash
+cat > "$IRIS_HOME/bridge/.env" <<EOF
+IRIS_HERMES_HOME=$HERMES_HOME
+IRIS_HERMES_SRC=$HERMES_SRC
+IRIS_HERMES_CLI=$HERMES_CLI
+IRIS_HOST=127.0.0.1
+IRIS_PORT=8807
+EOF
+chmod 600 "$IRIS_HOME/bridge/.env"
 ```
 
 > `IRIS_HERMES_CLI` must be the **full path** to the hermes binary — systemd runs with a minimal PATH and won't resolve bare command names.
@@ -44,30 +68,79 @@ IRIS_HERMES_CLI=/home/actualuser/.hermes/venv/bin/hermes
 
 ## 4. Provision a device token
 
-```bash
-cd /home/user/iris/bridge
-/home/user/.hermes/venv/bin/python manage_tokens.py add phone-3a
-# Copy the printed token — paste it into the Iris app on the phone.
-```
 
-## 5. Install the systemd service
-
-Substitute your actual username before installing:
+Create one token per phone/device. The token is the only bridge secret stored on the phone; it must never be committed to Git, or shared with another device.
 
 ```bash
-sed "s|/home/user|/home/$USER|g; s|User=user|User=$USER|g" \
-  /home/$USER/iris/bridge/iris-bridge.service \
-  | sudo tee /etc/systemd/system/iris-bridge.service > /dev/null
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now iris-bridge
+cd "$IRIS_HOME/bridge"
+"$HERMES_VENV/bin/python" manage_tokens.py add phone-3a
+"$HERMES_VENV/bin/python" manage_tokens.py list
+stat -c '%a %n' auth.json  # expect: 600 auth.json
 ```
 
-Verify it's running:
+Copy the token directly into the Iris app. `auth.json` is the local token store and is expected to have mode `0600`.
+
+## 5. Install the bridge as a user service (no sudo)
+
+Create `~/.config/systemd/user/iris-bridge.service`:
+
 ```bash
-systemctl status iris-bridge --no-pager
-curl http://localhost:8807/healthz   # expect: {"ok":true}
+mkdir -p "$HOME/.config/systemd/user"
+cat > "$HOME/.config/systemd/user/iris-bridge.service" <<EOF
+[Unit]
+Description=Iris PTT Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$IRIS_HOME/bridge
+Environment=HERMES_HOME=$HERMES_HOME
+Environment=PYTHONPATH=$HERMES_SRC
+EnvironmentFile=$IRIS_HOME/bridge/.env
+ExecStart=$HERMES_VENV/bin/uvicorn main:app --host 127.0.0.1 --port 8807
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=$IRIS_HOME/bridge
+UMask=0077
+
+[Install]
+WantedBy=default.target
+EOF
+
+systemd-analyze --user verify "$HOME/.config/systemd/user/iris-bridge.service"
+systemctl --user daemon-reload
+systemctl --user enable --now iris-bridge
 ```
+
+Verify the intended service, listener, and access-control boundary:
+
+```bash
+systemctl --user is-enabled iris-bridge  # expect: enabled
+systemctl --user is-active iris-bridge   # expect: active
+curl --fail --silent --show-error http://127.0.0.1:8807/healthz
+# expect: {"ok":true}
+
+curl --silent -o /dev/null -w '%{http_code}\n' \
+  -F 'file=@/etc/hosts;filename=test.m4a' \
+  http://127.0.0.1:8807/ptt/audio
+# expect: 401
+
+ss -ltn '( sport = :8807 )'
+# expect a listener only on 127.0.0.1:8807
+```
+
+For a user service to remain available after logout and across reboot, check lingering:
+
+```bash
+loginctl show-user "$USER" -p Linger
+# expect: Linger=yes
+```
+
+If it is `no`, enabling it requires a one-time local administrator action: `sudo loginctl enable-linger "$USER"`.
 
 ## 6. Expose the bridge publicly
 
