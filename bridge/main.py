@@ -13,7 +13,6 @@ app = FastAPI(title="Iris Bridge")
 class PttResponse(BaseModel):
     transcript: str
     response: str
-    session_id: str
 
 
 @app.get("/healthz")
@@ -34,9 +33,9 @@ async def ptt_audio(
         tmp.close()
         try:
             transcript = transcribe(Path(tmp.name))
-            response, session_id = run_agent_turn(transcript)
+            response = run_agent_turn(transcript)
         except RuntimeError as e:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
-        return PttResponse(transcript=transcript, response=response, session_id=session_id)
+        return PttResponse(transcript=transcript, response=response)
     finally:
         Path(tmp.name).unlink(missing_ok=True)
