@@ -13,6 +13,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -64,6 +66,7 @@ class MainActivity : ComponentActivity() {
         return false
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -71,10 +74,13 @@ class MainActivity : ComponentActivity() {
         // Check audio runtime permission on launch
         checkAndRequestAudioPermission()
 
+        val config = SecureConfig(this)
+
         setContent {
             IrisTheme {
                 var keyState by remember { mutableStateOf("waiting…") }
                 var isAccessibilityEnabled by remember { mutableStateOf(false) }
+                var showSettings by remember { mutableStateOf(false) }
 
                 // Check service status when returning to the app
                 DisposableEffect(Unit) {
@@ -104,7 +110,23 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
+                if (showSettings) {
+                    SettingsSheet(config = config, onDismiss = { showSettings = false })
+                }
+
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    topBar = {
+                        TopAppBar(
+                            title = { Text("Iris") },
+                            actions = {
+                                IconButton(onClick = { showSettings = true }) {
+                                    Icon(Icons.Default.Settings, contentDescription = "Settings")
+                                }
+                            }
+                        )
+                    }
+                ) { padding ->
                     Box(
                         modifier = Modifier.fillMaxSize().padding(padding),
                         contentAlignment = Alignment.Center,
