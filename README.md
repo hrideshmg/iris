@@ -7,7 +7,7 @@ A Nothing Phone 3a companion app for [hermes-agent](https://github.com/youruser/
 Paste this into Hermes:
 
 ```
-Read https://github.com/hrideshmg/iris/blob/main/bridge/INSTALL.md and follow every step to deploy the Iris PTT bridge.
+Read https://raw.githubusercontent.com/hrideshmg/iris/refs/heads/main/bridge/INSTALL.md and follow every step to deploy the Iris PTT bridge.
 ```
 
 ## Structure
