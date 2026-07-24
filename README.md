@@ -1,6 +1,6 @@
 # Iris
 
-A Nothing Phone 3a companion app for [hermes-agent](https://github.com/youruser/hermes-agent). Hold the Essential Key and speak.
+A Nothing Phone 3a companion app for [hermes-agent](https://github.com/nousresearch/hermes-agent) Hold the Essential Key and speak.
 
 ## Deploy the bridge
 
