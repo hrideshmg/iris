@@ -72,11 +72,12 @@ class KeySnifferService : AccessibilityService() {
 
             vibrate()
             Log.d(TAG, "recording started: ${currentFile?.absolutePath}")
-            broadcast("DOWN")
+            broadcastStatus(STATUS_RECORDING)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start recording", e)
             r.release()
             recorder = null
+            broadcastStatus(STATUS_ERROR, "Couldn't start recording.")
         }
     }
 
@@ -86,22 +87,28 @@ class KeySnifferService : AccessibilityService() {
         } catch (e: RuntimeException) {
             Log.w(TAG, "stop() failed (too short?): ${e.message}")
             cleanup()
-            broadcast("UP")
+            broadcastStatus(STATUS_DISCARDED)
             return
         }
 
         val fileToUpload = currentFile
         cleanup()
-        broadcast("UP")
 
         if (fileToUpload != null) {
+            broadcastStatus(STATUS_WORKING)
             uploadExecutor.execute {
-                bridgeClient.uploadAudio(fileToUpload) { msg ->
-                    MessageStore.save(this, msg)
-                    broadcastResponse(msg)
-                    postNotification(msg)
-                }
+                bridgeClient.uploadAudio(
+                    fileToUpload,
+                    onResult = { msg ->
+                        MessageStore.save(this, msg)
+                        broadcastResponse(msg)
+                        postNotification(msg)
+                    },
+                    onError = { reason -> broadcastStatus(STATUS_ERROR, reason) },
+                )
             }
+        } else {
+            broadcastStatus(STATUS_DISCARDED)
         }
         vibrate()
         Log.d(TAG, "recording saved: ${fileToUpload?.absolutePath}")
@@ -119,11 +126,12 @@ class KeySnifferService : AccessibilityService() {
         recorder = null
     }
 
-    private fun broadcast(action: String) {
+    private fun broadcastStatus(status: String, detail: String? = null) {
         sendBroadcast(
-            Intent(ACTION_KEY_EVENT)
+            Intent(ACTION_STATUS)
                 .setPackage(packageName)
-                .putExtra(EXTRA_ACTION, action)
+                .putExtra(EXTRA_STATUS, status)
+                .putExtra(EXTRA_DETAIL, detail)
         )
     }
 
@@ -169,12 +177,20 @@ class KeySnifferService : AccessibilityService() {
 
     companion object {
         const val ESSENTIAL_SCAN_CODE = 250
-        const val ACTION_KEY_EVENT = "com.example.iris.ESSENTIAL_KEY"
+        const val ACTION_STATUS = "com.example.iris.STATUS"
         const val ACTION_RESPONSE = "com.example.iris.RESPONSE"
-        const val EXTRA_ACTION = "action"
+        const val EXTRA_STATUS = "status"
+        const val EXTRA_DETAIL = "detail"
         const val EXTRA_TRANSCRIPT = "transcript"
         const val EXTRA_RESPONSE = "response"
         const val EXTRA_TIMESTAMP = "timestamp"
+
+        // Lifecycle of a single push-to-talk turn.
+        const val STATUS_RECORDING = "recording"
+        const val STATUS_WORKING = "working"
+        const val STATUS_DISCARDED = "discarded"
+        const val STATUS_ERROR = "error"
+
         private const val NOTIF_CHANNEL_ID = "iris_responses"
         private const val TAG = "KeySnifferService"
         private val notifId = AtomicInteger(1000)

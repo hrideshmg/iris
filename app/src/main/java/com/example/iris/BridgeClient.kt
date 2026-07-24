@@ -18,9 +18,14 @@ class BridgeClient(private val config: SecureConfig) {
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
 
-    fun uploadAudio(file: File, onResult: (PttMessage) -> Unit) {
+    fun uploadAudio(
+        file: File,
+        onResult: (PttMessage) -> Unit,
+        onError: (String) -> Unit = {},
+    ) {
         if (!config.isConfigured) {
             Log.w(TAG, "Bridge not configured, skipping upload")
+            onError("Not set up — add your bridge URL and token in settings.")
             return
         }
 
@@ -51,13 +56,16 @@ class BridgeClient(private val config: SecureConfig) {
                         onResult(msg)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to parse response", e)
+                        onError("Couldn't read the reply from Hermes.")
                     }
                 } else {
                     Log.e(TAG, "Upload failed: ${response.code} $bodyStr")
+                    onError("Bridge returned ${response.code}. Check your settings.")
                 }
             }
         } catch (e: IOException) {
             Log.e(TAG, "Upload error", e)
+            onError("Couldn't reach the bridge. Check your connection.")
         }
     }
 
