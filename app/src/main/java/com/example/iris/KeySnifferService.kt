@@ -158,13 +158,14 @@ class KeySnifferService : AccessibilityService() {
     private fun postNotification(msg: PttMessage) {
         val openIntent = PendingIntent.getActivity(
             this, 0,
-            Intent(this, MainActivity::class.java).apply {
+            Intent( this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notif = NotificationCompat.Builder(this, NOTIF_CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_name)
+            .setColor(0xFFE5484D.toInt())
             .setContentTitle("Reply from Hermes.")
             .setContentText(msg.response.take(120))
             .setStyle(NotificationCompat.BigTextStyle().bigText(msg.response))
